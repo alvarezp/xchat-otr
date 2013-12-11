@@ -34,6 +34,15 @@ void irc_send_message(IRC_CTX *ircctx, const char *recipient, char *msg)
 	xchat_commandf(ph, "PRIVMSG %s :%s", recipient, msg);
 }
 
+void otr_status_change(IRC_CTX *ircctx, const char *nick, int event)
+{
+	if (nick != NULL) {
+		xchat_printf(ph, "StatusChange %s : %s", nick, otr_status_txt[event]);
+	} else {
+		xchat_printf(ph, "StatusChange : %s", otr_status_txt[event]);
+	}
+}
+
 int cmd_otr(char *word[], char *word_eol[], void *userdata)
 {
 	const char *own_nick = xchat_get_info(ph, "nick");
@@ -68,6 +77,7 @@ int hook_outgoing(char *word[], char *word_eol[], void *userdata)
 		.nick = (char*)own_nick,
 		.address = (char*)server
 	};
+	xchat_context *query_ctx;
 
 	if ((*channel == '&') || (*channel == '#'))
 		return XCHAT_EAT_NONE;
@@ -80,6 +90,11 @@ int hook_outgoing(char *word[], char *word_eol[], void *userdata)
 
 	if (otrmsg == word_eol[1])
 		return XCHAT_EAT_NONE;
+
+	query_ctx = xchat_find_context(ph, server, channel);
+
+	if (query_ctx)
+		xchat_set_context(ph, query_ctx);
 
 	xchat_emit_print(ph, "Your Message", own_nick, word_eol[1], NULL,
 			 NULL);
@@ -244,3 +259,69 @@ IRC_CTX *server_find_address(char *address)
 
 	return &ircctx;
 }
+
+IRC_CTX *ircctx_by_peername(const char *peername, char *nick)
+{
+	static char pname[256];
+	char *address;
+
+	strcpy(pname, peername);
+
+	address = strchr(pname, '@');
+	if (!address)
+		return NULL;
+
+	*address = '\0';
+	strcpy(nick, pname);
+	*address++ = '@';
+
+	return server_find_address(address);
+}
+
+void otr_log(IRC_CTX *ircctx, const char *nick, int level,
+	     const char *format, ...)
+{
+	va_list params;
+	va_start(params, format);
+	char msg[LOGMAX], *s = msg;
+	xchat_context *find_query_ctx;
+	char *server = NULL;
+
+	if ((level == LVL_DEBUG) && !debug)
+		return;
+
+	s += sprintf(s, "%s", "%9OTR%9");
+
+	s += sprintf(s, ": ");
+
+	if (vsnprintf(s, LOGMAX, format, params) < 0)
+		sprintf(s, "internal error parsing error string (BUG)");
+
+	va_end(params);
+
+	if (ircctx)
+		server = ircctx->address;
+
+	if (server && nick) {
+		find_query_ctx = xchat_find_context(ph, server, nick);
+		if (find_query_ctx == NULL) {
+			// no query window yet, let's open one
+			xchat_commandf(ph, "query %s", nick);
+			find_query_ctx = xchat_find_context(ph, server, nick);
+		}
+	} else {
+		find_query_ctx = xchat_find_context(ph,
+						    NULL,
+						    xchat_get_info(ph,
+								   "network")
+						    ?
+						    :
+						    xchat_get_info(ph,
+								   "server"));
+	}
+
+	xchat_set_context(ph, find_query_ctx);
+
+	xchat_printf(ph, "OTR: %s", s);
+}
+

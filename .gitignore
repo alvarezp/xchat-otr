@@ -7,3 +7,4 @@ mainwindows.h
 *.swp
 cscope.files
 cscope.out
+build
